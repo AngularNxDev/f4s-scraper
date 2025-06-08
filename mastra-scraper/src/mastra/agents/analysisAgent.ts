@@ -92,6 +92,14 @@ export async function analyzeLocationContent(
   error?: string;
 }> {
   try {
+    // Check if OpenAI API key is available
+    const hasOpenAIKey = !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key_here';
+    
+    if (!hasOpenAIKey) {
+      console.log('🤖 OpenAI API key not configured, using fallback analysis');
+      return provideFallbackAnalysis(content, previousContent);
+    }
+
     const analysisPrompt = previousContent 
       ? `Please analyze the following web content for gym/fitness location information and compare it with the previous version to detect any changes.
 
@@ -116,16 +124,21 @@ Tasks:
 2. Extract any gym locations with details like addresses, phone numbers, and status
 3. Provide a confidence assessment of your findings`;
 
-    const response = await analysisAgent.generate(analysisPrompt, {
+    // Add timeout to prevent hanging
+    const analysisPromise = analysisAgent.generate(analysisPrompt, {
       maxSteps: 5
     });
+    
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Analysis timeout after 10 seconds')), 10000);
+    });
+    
+    const response = await Promise.race([analysisPromise, timeoutPromise]) as any;
 
     // Extract structured data from the agent's tool usage
-    // This is simplified - in practice, you'd parse the tool results more carefully
     const text = response.text;
     
     // Parse the response to extract structured information
-    // This is a basic implementation - you might want to use structured output
     const hasLocationKeywords = [
       'address', 'location', 'phone', 'gym', 'fitness',
       'street', 'avenue', 'road', 'boulevard'
@@ -145,23 +158,149 @@ Tasks:
     return {
       success: true,
       hasLocationInfo: hasLocationKeywords,
-      locations: [], // Would be populated from tool analysis
-      changes: [], // Would be populated from change detection
-      summary: `Analysis complete. ${hasLocationKeywords ? 'Location information detected' : 'No clear location information found'}. ${hasStatusIndicators ? 'Status indicators found.' : ''}`,
+      locations: extractBasicLocations(content),
+      changes: previousContent ? detectBasicChanges(content, previousContent) : [],
+      summary: `AI Analysis complete. ${hasLocationKeywords ? 'Location information detected' : 'No clear location information found'}. ${hasStatusIndicators ? 'Status indicators found.' : ''}`,
       confidence
     };
 
   } catch (error) {
-    return {
-      success: false,
-      hasLocationInfo: false,
-      locations: [],
-      changes: [],
-      summary: 'Analysis failed',
-      confidence: 0,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
-    };
+    console.error('🤖 AI Analysis failed, using fallback:', error);
+    return provideFallbackAnalysis(content, previousContent);
   }
+}
+
+// Fallback analysis when OpenAI is not available
+function provideFallbackAnalysis(content: string, previousContent?: string) {
+  const hasLocationKeywords = [
+    'address', 'location', 'phone', 'gym', 'fitness',
+    'street', 'avenue', 'road', 'boulevard'
+  ].some(keyword => content.toLowerCase().includes(keyword));
+
+  const statusKeywords = [
+    'now open', 'opening soon', 'coming soon', 'grand opening'
+  ];
+
+  const hasStatusIndicators = statusKeywords.some(status => 
+    content.toLowerCase().includes(status)
+  );
+
+  const confidence = hasLocationKeywords ? (hasStatusIndicators ? 0.8 : 0.6) : 0.3;
+
+  return {
+    success: true,
+    hasLocationInfo: hasLocationKeywords,
+    locations: extractBasicLocations(content),
+    changes: previousContent ? detectBasicChanges(content, previousContent) : [],
+    summary: `Fallback analysis complete. ${hasLocationKeywords ? 'Location information detected' : 'No clear location information found'}. ${hasStatusIndicators ? 'Status indicators found.' : ''} (Note: Using pattern-based analysis - configure OpenAI API key for AI-powered analysis)`,
+    confidence
+  };
+}
+
+// Basic location extraction using patterns
+function extractBasicLocations(content: string) {
+  const locations: Array<{
+    name: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+    phone?: string;
+    status?: 'opening_soon' | 'now_open' | 'coming_soon';
+    confidence: number;
+  }> = [];
+
+  // Extract addresses
+  const addressPattern = /\d+[^,\n]*(?:street|st|avenue|ave|road|rd|blvd|boulevard|drive|dr)[^,\n]*/gi;
+  const phonePattern = /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
+  const zipPattern = /\b\d{5}(?:-\d{4})?\b/g;
+  
+  const addresses = content.match(addressPattern) || [];
+  const phones = content.match(phonePattern) || [];
+  const zips = content.match(zipPattern) || [];
+
+  // Look for gym names
+  const gymNamePatterns = [
+    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Gym|Fitness|Health Club|Athletic Club))/gi,
+    /((?:Gym|Fitness|Health Club|Athletic Club)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi,
+    /(Planet Fitness|LA Fitness|Gold's Gym|24 Hour Fitness|Anytime Fitness)/gi
+  ];
+
+  const gymNames: string[] = [];
+  gymNamePatterns.forEach(pattern => {
+    const matches = Array.from(content.matchAll(pattern));
+    matches.forEach(match => {
+      if (match[1] && !gymNames.includes(match[1])) {
+        gymNames.push(match[1].trim());
+      }
+    });
+  });
+
+  // Determine status
+  let status: 'opening_soon' | 'now_open' | 'coming_soon' | undefined;
+  if (content.toLowerCase().includes('now open')) {
+    status = 'now_open';
+  } else if (content.toLowerCase().includes('opening soon')) {
+    status = 'opening_soon';
+  } else if (content.toLowerCase().includes('coming soon')) {
+    status = 'coming_soon';
+  }
+
+  // Create location objects
+  const maxLocations = Math.max(addresses.length, gymNames.length, 1);
+  
+  for (let i = 0; i < maxLocations; i++) {
+    const location = {
+      name: gymNames[i] || `Location ${i + 1}`,
+      address: addresses[i]?.trim(),
+      phone: phones[i],
+      zipCode: zips[i],
+      status,
+      confidence: addresses[i] ? 80 : 50
+    };
+    
+    locations.push(location);
+  }
+
+  return locations;
+}
+
+// Basic change detection
+function detectBasicChanges(content: string, previousContent: string) {
+  const changes: Array<{
+    type: 'new_location' | 'updated_location' | 'removed_location' | 'content_change';
+    description: string;
+    location?: string;
+  }> = [];
+
+  // Simple content length comparison
+  const lengthDifference = Math.abs(content.length - previousContent.length);
+  
+  if (lengthDifference > 100) {
+    changes.push({
+      type: 'content_change',
+      description: `Significant content change detected. Content length changed by ${lengthDifference} characters.`
+    });
+  }
+
+  // Look for new location indicators
+  const newLocationIndicators = [
+    'new location', 'now open', 'grand opening', 'coming soon to', 'opening in'
+  ];
+
+  newLocationIndicators.forEach(indicator => {
+    const inCurrent = content.toLowerCase().includes(indicator);
+    const inPrevious = previousContent.toLowerCase().includes(indicator);
+    
+    if (inCurrent && !inPrevious) {
+      changes.push({
+        type: 'new_location',
+        description: `New location indicator detected: "${indicator}"`
+      });
+    }
+  });
+
+  return changes;
 }
 
 export async function extractGymLocations(content: string): Promise<{
