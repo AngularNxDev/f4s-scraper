@@ -49,40 +49,41 @@ export class SchedulerService {
     this.logger.log('Starting scheduled content scraping');
 
     try {
-      const activeInfoUrls = await this.supabaseService.getAllActiveInfoUrls();
-      this.logger.log(`Found ${activeInfoUrls.length} active info URLs to scrape`);
+      // Get all active discovered URLs from active base URLs
+      const activeDiscoveredUrls = await this.supabaseService.getAllActiveDiscoveredUrls();
+      this.logger.log(`Found ${activeDiscoveredUrls.length} active discovered URLs to scrape`);
 
       let successCount = 0;
       let errorCount = 0;
 
-      for (const infoUrl of activeInfoUrls) {
+      for (const discoveredUrl of activeDiscoveredUrls) {
         try {
-          this.logger.log(`Scraping: ${infoUrl.url}`);
+          this.logger.log(`Scraping: ${discoveredUrl.url}`);
 
           // Create scraping job
           const scrapingJob = await this.supabaseService.createScrapingJob({
-            infoUrlId: infoUrl.id,
+            infoUrlId: discoveredUrl.id,
             status: 'running',
             startedAt: new Date(),
             retryCount: 0,
           });
 
           // Perform scraping
-          const result = await this.scraperService.scrapeWithRetry(infoUrl.url, 3);
+          const result = await this.scraperService.scrapeWithRetry(discoveredUrl.url, 3);
 
           if (result.success && result.content) {
             // Check for content changes
             const changeResult = await this.contentComparisonService.compareAndDetectChanges(
-              infoUrl.id,
+              discoveredUrl.id,
               result.content,
               result.metadata
             );
 
             if (changeResult.hasChanges) {
-              this.logger.log(`Content changes detected for: ${infoUrl.url}`);
+              this.logger.log(`Content changes detected for: ${discoveredUrl.url}`);
               
               // Here you could trigger alerts to the MCP server
-              await this.notifyMcpServer(infoUrl, changeResult);
+              await this.notifyMcpServer(discoveredUrl, changeResult);
             }
 
             // Update scraping job as completed
@@ -91,10 +92,14 @@ export class SchedulerService {
               completedAt: new Date(),
             });
 
-            // Update info URL last scraped time
-            await this.supabaseService.updateInfoUrl(infoUrl.id, {
-              lastScraped: new Date(),
-            });
+            // Update discovered URL last scraped time (if this column exists)
+            try {
+              await this.supabaseService.updateInfoUrl(discoveredUrl.id, {
+                lastScraped: new Date(),
+              });
+            } catch (updateError) {
+              this.logger.warn(`Could not update lastScraped for ${discoveredUrl.id}:`, updateError);
+            }
 
             successCount++;
           } else {
@@ -105,7 +110,7 @@ export class SchedulerService {
               error: result.error,
             });
 
-            this.logger.error(`Failed to scrape ${infoUrl.url}: ${result.error}`);
+            this.logger.error(`Failed to scrape ${discoveredUrl.url}: ${result.error}`);
             errorCount++;
           }
 
@@ -113,7 +118,7 @@ export class SchedulerService {
           await this.delay(2000);
 
         } catch (error) {
-          this.logger.error(`Error scraping ${infoUrl.url}:`, error);
+          this.logger.error(`Error scraping ${discoveredUrl.url}:`, error);
           errorCount++;
         }
       }
@@ -239,24 +244,82 @@ export class SchedulerService {
   }
 
   async triggerContentScraping(): Promise<void> {
-    this.logger.log('Manually triggering content scraping');
-    await this.performContentScraping();
-  }
+    if (this.isScrapingActive) {
+      this.logger.warn('Scraping is already active, skipping manual trigger');
+      return;
+    }
 
-  async triggerSingleUrlScraping(infoUrlId: string): Promise<void> {
-    this.logger.log(`Manually triggering scraping for info URL: ${infoUrlId}`);
+    this.isScrapingActive = true;
+    this.logger.log('Manually triggering content scraping');
 
     try {
-      const allInfoUrls = await this.supabaseService.getAllActiveInfoUrls();
-      const targetUrl = allInfoUrls.find(url => url.id === infoUrlId);
+      // Get all active discovered URLs from active base URLs
+      const activeDiscoveredUrls = await this.supabaseService.getAllActiveDiscoveredUrls();
+      this.logger.log(`Found ${activeDiscoveredUrls.length} active discovered URLs to scrape`);
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const discoveredUrl of activeDiscoveredUrls) {
+        try {
+          this.logger.log(`Scraping: ${discoveredUrl.url}`);
+          
+          const result = await this.scraperService.scrapeWithRetry(discoveredUrl.url, 3);
+
+          if (result.success && result.content) {
+            const changeResult = await this.contentComparisonService.compareAndDetectChanges(
+              discoveredUrl.id,
+              result.content,
+              result.metadata
+            );
+
+            if (changeResult.hasChanges) {
+              this.logger.log(`Content changes detected for: ${discoveredUrl.url}`);
+              await this.notifyMcpServer(discoveredUrl, changeResult);
+            }
+
+            successCount++;
+          } else {
+            this.logger.error(`Failed to scrape ${discoveredUrl.url}: ${result.error}`);
+            errorCount++;
+          }
+
+          // Add delay between requests
+          await this.delay(2000);
+
+        } catch (error) {
+          this.logger.error(`Error scraping ${discoveredUrl.url}:`, error);
+          errorCount++;
+        }
+      }
+
+      this.logger.log(`Manual content scraping completed. Success: ${successCount}, Errors: ${errorCount}`);
+
+    } catch (error) {
+      this.logger.error('Error during manual content scraping:', error);
+    } finally {
+      this.isScrapingActive = false;
+    }
+  }
+
+  async triggerSingleUrlScraping(discoveredUrlId: string): Promise<void> {
+    this.logger.log(`Manually triggering scraping for discovered URL: ${discoveredUrlId}`);
+
+    try {
+      const allDiscoveredUrls = await this.supabaseService.getAllActiveDiscoveredUrls();
+      const targetUrl = allDiscoveredUrls.find(url => url.id === discoveredUrlId);
 
       if (!targetUrl) {
-        throw new Error(`Info URL with ID ${infoUrlId} not found`);
+        throw new Error(`Discovered URL with ID ${discoveredUrlId} not found`);
       }
+
+      this.logger.log(`Found target URL: ${targetUrl.url}`);
 
       const result = await this.scraperService.scrapeWithRetry(targetUrl.url, 3);
 
       if (result.success && result.content) {
+        this.logger.log(`Successfully scraped ${targetUrl.url}, content length: ${result.content.length}`);
+        
         const changeResult = await this.contentComparisonService.compareAndDetectChanges(
           targetUrl.id,
           result.content,
@@ -268,12 +331,20 @@ export class SchedulerService {
           await this.notifyMcpServer(targetUrl, changeResult);
         }
 
-        await this.supabaseService.updateInfoUrl(targetUrl.id, {
-          lastScraped: new Date(),
-        });
+        // Try to update last scraped time if the column exists
+        try {
+          await this.supabaseService.updateInfoUrl(targetUrl.id, {
+            lastScraped: new Date(),
+          });
+        } catch (updateError) {
+          this.logger.warn(`Could not update lastScraped for ${targetUrl.id}:`, updateError);
+        }
+      } else {
+        this.logger.error(`Failed to scrape ${targetUrl.url}: ${result.error}`);
+        throw new Error(result.error || 'Scraping failed');
       }
     } catch (error) {
-      this.logger.error(`Error in manual scraping for ${infoUrlId}:`, error);
+      this.logger.error(`Error in manual scraping for ${discoveredUrlId}:`, error);
       throw error;
     }
   }

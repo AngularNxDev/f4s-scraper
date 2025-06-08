@@ -240,31 +240,30 @@ export class AppController {
   @Post('trigger/content-scraping')
   async triggerContentScraping(@Body() body?: { targetUrls?: string[] }) {
     try {
-      // If specific URLs are provided, create temporary info URLs and scrape them
+      // If specific URLs are provided, create discovered URLs and scrape them
       if (body?.targetUrls && body.targetUrls.length > 0) {
         const results: Array<{
           url: string;
-          infoUrlId?: string;
+          discoveredUrlId?: string;
           status: string;
           error?: string;
         }> = [];
         
         for (const url of body.targetUrls) {
           try {
-            // Create a temporary info URL entry
-            const tempInfoUrl = await this.supabaseService.createInfoUrl({
-              baseUrlId: 'a3751a8c-6f27-495e-8575-597c4d864bc5', // Use existing base URL
-              url: url,
-              pageType: 'other',
-              status: 'active',
-            });
+            // Create a discovered URL entry
+            const discoveredUrl = await this.supabaseService.createDiscoveredUrl(
+              'a3751a8c-6f27-495e-8575-597c4d864bc5',
+              url,
+              'other'
+            );
 
             // Immediately scrape this URL
-            await this.schedulerService.triggerSingleUrlScraping(tempInfoUrl.id);
+            await this.schedulerService.triggerSingleUrlScraping(discoveredUrl.id);
             
             results.push({
               url: url,
-              infoUrlId: tempInfoUrl.id,
+              discoveredUrlId: discoveredUrl.id,
               status: 'scraped'
             });
             
@@ -287,11 +286,11 @@ export class AppController {
         };
       }
       
-      // Original behavior - scrape all existing active URLs
+      // Original behavior - scrape all existing active discovered URLs
       await this.schedulerService.triggerContentScraping();
       return { 
         message: 'Content scraping triggered successfully',
-        note: 'If no content appears, there may be no active URLs to scrape. Try adding URLs first.'
+        note: 'Scraping all discovered URLs from active base URLs'
       };
     } catch (error) {
       return {
@@ -397,4 +396,6 @@ export class AppController {
       status: 'connected'
     };
   }
+
+
 }

@@ -106,11 +106,23 @@ export class SupabaseService {
       .eq('status', 'active');
 
     if (error) {
-      this.logger.error('Error fetching all active info URLs:', error);
+      this.logger.error('Error fetching active info URLs:', error);
       throw error;
     }
 
-    return data || [];
+    if (!data) return [];
+
+    // Convert database response to TypeScript format
+    return data.map(item => ({
+      id: item.id,
+      baseUrlId: item.base_url_id,
+      url: item.url,
+      pageType: item.page_type,
+      status: item.status,
+      lastScraped: item.last_scraped ? new Date(item.last_scraped) : undefined,
+      createdAt: new Date(item.created_at),
+      updatedAt: new Date(item.updated_at)
+    }));
   }
 
   async createInfoUrl(infoUrl: Omit<InfoUrl, 'id' | 'createdAt' | 'updatedAt'>): Promise<InfoUrl> {
@@ -163,7 +175,7 @@ export class SupabaseService {
     const { data, error } = await this.supabase
       .from('scraped_content')
       .select('*')
-      .eq('info_url_id', infoUrlId)
+      .eq('discovered_url_id', infoUrlId)
       .order('scraped_at', { ascending: false })
       .limit(1)
       .single();
@@ -178,7 +190,7 @@ export class SupabaseService {
     // Convert database response to TypeScript format
     return {
       id: data.id,
-      infoUrlId: data.info_url_id,
+      infoUrlId: data.discovered_url_id,
       content: data.content,
       contentHash: data.content_hash,
       metadata: data.metadata,
@@ -204,7 +216,7 @@ export class SupabaseService {
 
     // Map TypeScript camelCase to database snake_case explicitly
     const dbContent = {
-      info_url_id: content.infoUrlId,
+      discovered_url_id: content.infoUrlId,
       content: content.content,
       content_hash: content.contentHash,
       metadata: content.metadata || {},
@@ -228,7 +240,7 @@ export class SupabaseService {
     // Convert response back to TypeScript format
     return {
       id: data.id,
-      infoUrlId: data.info_url_id,
+      infoUrlId: data.discovered_url_id,
       content: data.content,
       contentHash: data.content_hash,
       metadata: data.metadata,
@@ -355,5 +367,50 @@ export class SupabaseService {
     }
 
     return data || [];
+  }
+
+  // New method to get discovered URLs from active base URLs
+  async getAllActiveDiscoveredUrls(): Promise<any[]> {
+    const { data, error } = await this.supabase
+      .from('discovered_urls')
+      .select(`
+        *,
+        base_urls!inner (
+          id,
+          url,
+          name,
+          status
+        )
+      `)
+      .eq('base_urls.status', 'active');
+
+    if (error) {
+      this.logger.error('Error fetching active discovered URLs:', error);
+      throw error;
+    }
+
+    this.logger.log(`Found ${data?.length || 0} active discovered URLs`);
+    return data || [];
+  }
+
+  // Create discovered URL
+  async createDiscoveredUrl(baseUrlId: string, url: string, pageType = 'other'): Promise<any> {
+    const { data, error } = await this.supabase
+      .from('discovered_urls')
+      .insert([{
+        base_url_id: baseUrlId,
+        url: url,
+        page_type: pageType
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      this.logger.error('Error creating discovered URL:', error);
+      throw error;
+    }
+
+    this.logger.log(`Created discovered URL: ${url} with ID: ${data.id}`);
+    return data;
   }
 } 
