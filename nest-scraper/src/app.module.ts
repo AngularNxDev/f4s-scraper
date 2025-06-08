@@ -8,6 +8,7 @@ import { ScraperModule } from './modules/scraper/scraper.module';
 import { UrlDiscoveryModule } from './modules/url-discovery/url-discovery.module';
 import { ContentComparisonModule } from './modules/content-comparison/content-comparison.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
     UrlDiscoveryModule,
     ContentComparisonModule,
     SchedulerModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],
