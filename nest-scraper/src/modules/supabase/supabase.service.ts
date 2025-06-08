@@ -145,6 +145,20 @@ export class SupabaseService {
   }
 
   // Scraped content operations
+  async getAllScrapedContent(): Promise<any[]> {
+    const { data, error } = await this.supabase
+      .from('scraped_content')
+      .select('*')
+      .order('scraped_at', { ascending: false });
+
+    if (error) {
+      this.logger.error('Error fetching all scraped content:', error);
+      throw error;
+    }
+
+    return data || [];
+  }
+
   async getLatestScrapedContent(infoUrlId: string): Promise<ScrapedContent | null> {
     const { data, error } = await this.supabase
       .from('scraped_content')

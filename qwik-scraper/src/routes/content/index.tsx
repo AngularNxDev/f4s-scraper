@@ -154,16 +154,46 @@ export default component$(() => {
                 });
                 
                 if (response.ok) {
+                  const result = await response.json();
+                  alert(`✅ ${result.message}\n\n${result.note || 'Check back in a few seconds for results.'}`);
                   // Refresh the page after a short delay to see new content
-                  setTimeout(() => window.location.reload(), 2000);
+                  setTimeout(() => window.location.reload(), 3000);
+                } else {
+                  throw new Error(`HTTP ${response.status}`);
                 }
               } catch (error) {
                 console.error('Error triggering scraping:', error);
+                alert(`❌ Failed to trigger scraping: ${error instanceof Error ? error.message : 'Unknown error'}`);
               }
             }}
             class="btn btn-primary"
           >
             🕷️ Trigger Test Scraping
+          </button>
+          <button
+            onClick$={async () => {
+              try {
+                const response = await fetch('http://localhost:3000/scraped-content/create-test-data', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                });
+                
+                if (response.ok) {
+                  const result = await response.json();
+                  alert(`✅ ${result.message}\n\n${result.note || 'Test data created successfully!'}`);
+                  // Refresh the page to see new content
+                  setTimeout(() => window.location.reload(), 1000);
+                } else {
+                  throw new Error(`HTTP ${response.status}`);
+                }
+              } catch (error) {
+                console.error('Error creating test data:', error);
+                alert(`❌ Failed to create test data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              }
+            }}
+            class="btn btn-secondary"
+          >
+            🧪 Create Test Data
           </button>
           <button
             onClick$={() => window.location.reload()}

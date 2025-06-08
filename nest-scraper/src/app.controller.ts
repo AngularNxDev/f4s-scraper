@@ -120,6 +120,66 @@ export class AppController {
   }
 
   // Scraped content endpoints
+  @Get('scraped-content')
+  async getAllScrapedContent() {
+    return await this.supabaseService.getAllScrapedContent();
+  }
+
+  @Post('scraped-content/create-test-data')
+  async createTestScrapedContent() {
+    try {
+      const testData = [
+        {
+          infoUrlId: '63178e05-94c8-4c7d-97c5-98cbb8af3d8d',
+          content: '<html><head><title>HTTPBin HTML</title></head><body><h1>Herman Melville - Moby Dick</h1><p>Availing himself of the mild, summer-cool weather that now reigned in these latitudes, and in preparation for the peculiarly active pursuits shortly to be anticipated, Perth, the begrimed, blistered old blacksmith, had not removed his portable forge to the hold again, after concluding his contributory work for Ahab\'s leg, but still retained it on deck, fast lashed to ringbolts by the foremast; being now almost incessantly invoked by the headsmen, and harpooneers, and bowsmen to do some little job for them; altering, or repairing, or new shaping their various weapons and boat furniture. Often he would be surrounded by an eager circle, all waiting to be served; holding boat-spades, pike-heads, harpoons, and lances, and jealously watching his every sooty movement, as he toiled.</p></body></html>',
+          contentHash: 'abc123def456',
+          metadata: {
+            statusCode: 200,
+            contentType: 'text/html',
+            contentLength: 1234,
+            scrapeDuration: 1500,
+            userAgent: 'F4S-Scraper/1.0'
+          },
+          scrapedAt: new Date()
+        },
+        {
+          infoUrlId: '9f24412d-44f0-4342-b39e-f6a6551391a5',
+          content: '{"slideshow":{"author":"Yours Truly","date":"date of publication","slides":[{"title":"Wake up to WonderWidgets!","type":"all"},{"items":["Why <em>WonderWidgets</em> are great","Who <em>buys</em> WonderWidgets"],"title":"Overview","type":"all"}],"title":"Sample Slide Show"}}',
+          contentHash: 'def456ghi789',
+          metadata: {
+            statusCode: 200,
+            contentType: 'application/json',
+            contentLength: 567,
+            scrapeDuration: 800,
+            userAgent: 'F4S-Scraper/1.0'
+          },
+          scrapedAt: new Date()
+        }
+      ];
+
+      const results: any[] = [];
+      for (const data of testData) {
+        try {
+          const created = await this.supabaseService.createScrapedContent(data);
+          results.push(created);
+        } catch (error) {
+          results.push({ error: error.message, data });
+        }
+      }
+
+      return {
+        message: 'Test scraped content created successfully',
+        results: results,
+        note: 'Check the Content page to see the test data'
+      };
+    } catch (error) {
+      return {
+        message: 'Failed to create test data',
+        error: error.message
+      };
+    }
+  }
+
   @Get('scraped-content/:infoUrlId/latest')
   async getLatestScrapedContent(@Param('infoUrlId') infoUrlId: string) {
     return await this.supabaseService.getLatestScrapedContent(infoUrlId);
@@ -178,9 +238,67 @@ export class AppController {
   }
 
   @Post('trigger/content-scraping')
-  async triggerContentScraping() {
-    await this.schedulerService.triggerContentScraping();
-    return { message: 'Content scraping triggered successfully' };
+  async triggerContentScraping(@Body() body?: { targetUrls?: string[] }) {
+    try {
+      // If specific URLs are provided, create temporary info URLs and scrape them
+      if (body?.targetUrls && body.targetUrls.length > 0) {
+        const results: Array<{
+          url: string;
+          infoUrlId?: string;
+          status: string;
+          error?: string;
+        }> = [];
+        
+        for (const url of body.targetUrls) {
+          try {
+            // Create a temporary info URL entry
+            const tempInfoUrl = await this.supabaseService.createInfoUrl({
+              baseUrlId: 'a3751a8c-6f27-495e-8575-597c4d864bc5', // Use existing base URL
+              url: url,
+              pageType: 'other',
+              status: 'active',
+            });
+
+            // Immediately scrape this URL
+            await this.schedulerService.triggerSingleUrlScraping(tempInfoUrl.id);
+            
+            results.push({
+              url: url,
+              infoUrlId: tempInfoUrl.id,
+              status: 'scraped'
+            });
+            
+            // Add a small delay between requests
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+          } catch (error) {
+            results.push({
+              url: url,
+              status: 'error',
+              error: error.message
+            });
+          }
+        }
+        
+        return { 
+          message: 'Content scraping completed for target URLs',
+          results: results,
+          note: 'Check the Content page to see scraped data'
+        };
+      }
+      
+      // Original behavior - scrape all existing active URLs
+      await this.schedulerService.triggerContentScraping();
+      return { 
+        message: 'Content scraping triggered successfully',
+        note: 'If no content appears, there may be no active URLs to scrape. Try adding URLs first.'
+      };
+    } catch (error) {
+      return {
+        message: 'Content scraping failed',
+        error: error.message
+      };
+    }
   }
 
   @Post('trigger/scrape-url/:infoUrlId')
