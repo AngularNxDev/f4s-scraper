@@ -1,0 +1,24 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "./mcp-server"
+		},
+		{
+			"path": "./mastra-scraper"
+		},
+		{
+			"path": "./nest-scraper"
+		}
+	],
+	"settings": {
+		"emmet.includeLanguages": {
+			"typescriptreact": "html"
+		},
+		"emmet.preferences": {
+			"output.selfClosingStyle": "xhtml"
+		}
+	}
+}
